@@ -1,0 +1,56 @@
+name: Set Vercel Envs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  set-envs:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Comprobar secrets requeridos
+        run: |
+          test -n "$VERCEL_TOKEN" && test -n "$VERCEL_PROJECT_ID" && test -n "$VERCEL_ORG_ID" || (echo "Faltan secrets de Vercel" && exit 1)
+          test -n "$SUPABASE_URL" && test -n "$SUPABASE_ANON_KEY" && test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "Faltan secrets de Supabase" && exit 1)
+
+      - name: Instalar jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Eliminar variables existentes (si las hay)
+        run: |
+          set -e
+          for KEY in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
+            IDS=$(curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env?decrypt=false&teamId=$VERCEL_ORG_ID" \
+              | jq -r ".envs[] | select(.key==\"$KEY\") | .id")
+            for ID in $IDS; do
+              curl -fsS -X DELETE -H "Authorization: Bearer $VERCEL_TOKEN" \
+                "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env/$ID?teamId=$VERCEL_ORG_ID" >/dev/null || true
+            done
+          done
+
+      - name: Crear NEXT_PUBLIC_SUPABASE_URL
+        run: |
+          curl -fsS -X POST "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+            -d "{\"key\":\"NEXT_PUBLIC_SUPABASE_URL\",\"value\":\"$SUPABASE_URL\",\"target\":[\"development\",\"preview\",\"production\"],\"type\":\"encrypted\"}"
+
+      - name: Crear NEXT_PUBLIC_SUPABASE_ANON_KEY
+        run: |
+          curl -fsS -X POST "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+            -d "{\"key\":\"NEXT_PUBLIC_SUPABASE_ANON_KEY\",\"value\":\"$SUPABASE_ANON_KEY\",\"target\":[\"development\",\"preview\",\"production\"],\"type\":\"encrypted\"}"
+
+      - name: Crear SUPABASE_SERVICE_ROLE_KEY
+        run: |
+          curl -fsS -X POST "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+            -d "{\"key\":\"SUPABASE_SERVICE_ROLE_KEY\",\"value\":\"$SUPABASE_SERVICE_ROLE_KEY\",\"target\":[\"development\",\"preview\",\"production\"],\"type\":\"encrypted\"}"
