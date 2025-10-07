@@ -1,0 +1,47 @@
+name: Verify Vercel Envs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify-envs:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+    steps:
+      - name: Check required secrets
+        run: |
+          test -n "$VERCEL_TOKEN" && test -n "$VERCEL_PROJECT_ID" && test -n "$VERCEL_ORG_ID" || (echo "Missing Vercel secrets" && exit 1)
+
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Fetch envs from Vercel
+        run: |
+          curl -fsS -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env?decrypt=false&teamId=$VERCEL_ORG_ID" \
+            -o envs.json
+          cat envs.json | jq '{count: (.envs|length), keys: [.envs[].key] | unique}'
+
+      - name: Assert required envs exist
+        run: |
+          REQUIRED=("NEXT_PUBLIC_SUPABASE_URL" "NEXT_PUBLIC_SUPABASE_ANON_KEY" "SUPABASE_SERVICE_ROLE_KEY")
+          for KEY in "${REQUIRED[@]}"; do
+            EXISTS=$(jq -r --arg K "$KEY" '.envs[] | select(.key==$K) | .key' envs.json | wc -l)
+            if [ "$EXISTS" -eq 0 ]; then
+              echo "Missing env: $KEY"
+              exit 1
+            fi
+          done
+          echo "All required envs exist."
+
+      - name: Show targets per key (no values)
+        run: |
+          for KEY in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
+            echo "---- $KEY ----"
+            jq -r --arg K "$KEY" '.envs[] | select(.key==$K) | "target=\(.target)"' envs.json
+          done
